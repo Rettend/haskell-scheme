@@ -1,61 +1,92 @@
-module Src.Dropdown (dropdown, Option (..)) where
+module Src.Dropdown (dropdown) where
 
 import Control.Monad (forM_)
-import Debug.Trace (trace)
-import System.IO (hFlush, hReady, stdin, stdout)
+import System.IO
+  ( BufferMode (NoBuffering),
+    hGetBuffering,
+    hGetEcho,
+    hSetBuffering,
+    hSetEcho,
+    stdin,
+  )
+import System.IO.Unsafe ()
 
-getKey :: IO String
-getKey = do
-  char <- getChar
-  if char == '\ESC' -- If the first character is escape, read more characters
+-- A function that takes a list of options and outputs the selected index when done
+dropdown :: [String] -> IO Int
+dropdown options = do
+  -- Initialize the index to 0
+  let index = 0
+  -- Clear the screen and print the options
+  clearScreen
+  printOptions index options
+  -- Wait for the user input and handle it
+  handleInput index options
+
+-- A function that clears the screen using ANSI escape code
+clearScreen :: IO ()
+clearScreen = putStr "\ESC[2J"
+
+-- A function that prints the options with the selected one inverted
+printOptions :: Int -> [String] -> IO ()
+printOptions index options = do
+  -- Loop through the options and print them with ANSI escape codes
+  forM_ (zip [0 ..] options) $ \(i, option) -> do
+    -- If the option is selected, invert the background and foreground colors
+    if i == index then putStr "\ESC[7m" else putStr "\ESC[0m"
+    -- Print the option and a newline
+    putStrLn option
+
+-- A function that waits for the user input and handles it
+handleInput :: Int -> [String] -> IO Int
+handleInput index options = do
+  -- Get the next character from the standard input without echoing it
+  c <- getCharNoEcho
+  -- Check if it is an escape character (\ESC)
+  if c == '\ESC'
     then do
-      next <- getChar
-      if next == '[' -- If the next character is [, read one more character
+      -- Get the next two characters (should be '[' and either 'A' or 'B')
+      c1 <- getCharNoEcho
+      c2 <- getCharNoEcho
+      -- Check if they are valid arrow keys
+      if c1 == '[' && (c2 == 'A' || c2 == 'B')
         then do
-          final <- getChar
-          let key = [char, next, final] -- Store the whole sequence as a string
-          trace ("Key: " ++ key) (return key) -- Print the key and return it
+          -- Compute the new index by moving up or down and wrapping around
+          let newIndex = case c2 of
+                'A' -> (index - 1) `mod` length options -- Up arrow key
+                'B' -> (index + 1) `mod` length options -- Down arrow key
+                _ -> index -- Should not happen
+                -- Clear the screen and print the options with the new index
+          clearScreen
+          printOptions newIndex options
+          -- Recursively wait for the next input with the new index
+          handleInput newIndex options
         else do
-          let key = [char, next] -- Store the two characters as a string
-          trace ("Key: " ++ key) (return key) -- Print the key and return it
-    else do
-      let key = [char] -- Store the single character as a string
-      trace ("Key: " ++ key) (return key) -- Print the key and return it
-
--- A data type to represent an option with a string and an optional color
-data Option = Option String (Maybe Int)
-
--- A function that creates a dropdown menu with the given options and returns the selected option
-dropdown :: [Option] -> Int -> IO Int
-dropdown options selected = do
-  -- Print the options with ANSI escape codes to move the cursor and change the color
-  forM_ (zip [0 ..] options) $ \(i, Option s c) -> do
-    if i == selected -- If this is the selected option, print it in reverse color
-      then do
-        case c of -- If the option has a color, print it with its background color
-          Just n -> putStr (esc ++ "[" ++ show n ++ "m" ++ esc ++ "[7m " ++ s ++ " " ++ esc ++ "[0m\n")
-          Nothing -> putStr (esc ++ "[7m " ++ s ++ " " ++ esc ++ "[0m\n") -- Otherwise, print it as a normal string
-      else do
-        case c of -- If the option has a color, print it with its foreground color
-          Just n -> putStr (esc ++ "[" ++ show n ++ "m " ++ s ++ " " ++ esc ++ "[0m\n")
-          Nothing -> putStr (" " ++ s ++ "\n") -- Otherwise, print it as a normal string
-  key <- getKey -- Get a key from the user
-  if key == "\ESC" -- If the key is escape return -1 to cancel the selection
-    then return (-1)
-    else do
-      hFlush stdout -- Flush the output buffer
-      if key == "\n" -- If the key is enter, return the selected option
-        then return selected
+          -- Invalid arrow keys, ignore them and wait for the next input with the same index
+          handleInput index options
+    else
+      if c == '\n'
+        then do
+          -- Check if it is a newline character (\n)
+          -- Return the current index as the result
+          return index
         else do
-          let delta = case key of -- Determine the change in selection based on the key
-                "\ESC" -> 0 -- Escape key does not change the selection
-                "\ESC[A" -> -1 -- Up arrow key moves the selection up
-                "\ESC[B" -> 1 -- Down arrow key moves the selection down
-                _ -> 0 -- Any other key does not change the selection
-          let newSelected = (selected + delta) `mod` length options -- Calculate the new selected option with modulo arithmetic
-          putStr (esc ++ "[" ++ show (length options) ++ "A") -- Move the cursor up by the number of options
-          dropdown options newSelected -- Recursively call the function with the new selected option
+          -- Any other character, ignore it and wait for the next input with the same index
+          handleInput index options
 
--- A helper function to generate an ANSI escape code
-esc :: String
-esc = "\ESC"
+-- A helper function that gets a character from the standard input without echoing it
+-- This requires importing System.IO and System.IO.Unsafe
+getCharNoEcho :: IO Char
+getCharNoEcho = do
+  -- Save the original buffer mode and echo mode
+  oldBufferMode <- hGetBuffering stdin
+  oldEchoMode <- hGetEcho stdin
+  -- Set the buffer mode to NoBuffering and echo mode to False
+  hSetBuffering stdin NoBuffering
+  hSetEcho stdin False
+  -- Get a character from the standard input
+  c <- getChar
+  -- Restore the original buffer mode and echo mode
+  hSetBuffering stdin oldBufferMode
+  hSetEcho stdin oldEchoMode
+  -- Return the character
+  return c
