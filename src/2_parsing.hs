@@ -27,6 +27,7 @@ parseString = do
   return $ String x
 
 -- | Exercise 2
+-- kinda not right
 parseEscape :: Parser Char
 parseEscape = do
   char '\\'
@@ -56,7 +57,7 @@ parseNumber :: Parser LispVal
 --   return $ Number (read num)
 
 -- >>> show <$> Just 3
-
+-- Just "3"
 
 -- | Exercise 1.2
 -- parseNumber = many1 digit >>= (return . Number . read)
