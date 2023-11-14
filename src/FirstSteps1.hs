@@ -1,4 +1,4 @@
-module Main where
+module FirstSteps1 where
 
 import System.Environment (getArgs)
 
